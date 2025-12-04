@@ -9,7 +9,7 @@ const bodyParser = require('body-parser');
 require('dotenv').config();
 
 const config = require('./src/config');
-const routes = require('./src/api/routes');
+const routes = require('./src/routes');
 const { errorHandler, notFoundHandler } = require('./src/middleware/error.middleware');
 const { requestLogger } = require('./src/middleware/logger.middleware');
 
