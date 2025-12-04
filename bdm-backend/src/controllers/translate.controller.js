@@ -1,5 +1,6 @@
 // ============================================
 // FILE: src/controllers/translate.controller.js
+// ENHANCED: Full document translation endpoint
 // ============================================
 
 const { v4: uuidv4 } = require('uuid');
@@ -9,6 +10,7 @@ const { success, created, badRequest, notFound, serverError } = require('../util
 
 class TranslateController {
   
+  // Preview single clause/item translation
   async preview(req, res) {
     try {
       const { original_id, original_type, target_lang } = req.body;
@@ -17,10 +19,12 @@ class TranslateController {
         return badRequest(res, 'original_id, original_type, and target_lang are required');
       }
       
+      console.log(`🌐 Translating ${original_type}:${original_id} to ${target_lang}`);
+      
       const result = await translateService.translate(original_id, original_type, target_lang);
       
       const previewId = uuidv4();
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
       
       await translateModel.createPreview({
         preview_id: previewId,
@@ -32,17 +36,56 @@ class TranslateController {
         expires_at: expiresAt
       });
       
+      console.log(`✅ Translation preview created: ${previewId}`);
+      
       return created(res, {
         preview_id: previewId,
+        original_id,
+        original_type,
+        target_lang,
         translated_content: result.translated,
         expires_at: expiresAt,
         ai_metadata: {
           tokens_used: result.tokensUsed,
           model: result.model,
-          provider: result.provider
+          provider: result.provider,
+          is_html: result.isHTML
         }
       });
     } catch (error) {
+      console.error('❌ Translation preview error:', error);
+      return serverError(res, error);
+    }
+  }
+  
+  // NEW: Translate entire document
+  async translateDocument(req, res) {
+    try {
+      const { document_id, target_lang } = req.body;
+      
+      if (!document_id || !target_lang) {
+        return badRequest(res, 'document_id and target_lang are required');
+      }
+      
+      console.log(`\n🌍 Starting full document translation`);
+      console.log(`   Document ID: ${document_id}`);
+      console.log(`   Target Language: ${target_lang}`);
+      
+      const translatedDoc = await translateService.translateDocument(
+        document_id,
+        target_lang
+      );
+      
+      return created(res, {
+        message: 'Document translated successfully',
+        original_document_id: document_id,
+        translated_document: translatedDoc,
+        target_language: target_lang,
+        clauses_translated: translatedDoc.content_json?.clauses?.length || 0
+      });
+      
+    } catch (error) {
+      console.error('❌ Document translation error:', error);
       return serverError(res, error);
     }
   }
@@ -55,6 +98,8 @@ class TranslateController {
         return badRequest(res, 'preview_id is required');
       }
       
+      console.log(`✅ Confirming translation preview: ${preview_id}`);
+      
       const translationId = await translateModel.confirmPreview(preview_id, null);
       
       return success(res, {
@@ -62,6 +107,7 @@ class TranslateController {
         translation_id: translationId
       });
     } catch (error) {
+      console.error('❌ Translation confirm error:', error);
       return serverError(res, error);
     }
   }

@@ -4,7 +4,8 @@
 
 const express = require('express');
 const router = express.Router();
-
+const debugRoutes = require('./debug.routes');
+router.use('/debug', debugRoutes);
 const clauseRoutes = require('./clause.routes');
 const documentRoutes = require('./document.routes');
 const templateRoutes = require('./template.routes');

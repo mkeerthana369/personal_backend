@@ -1,6 +1,6 @@
 // ============================================
 // FILE: src/database/models/template.model.js
-// Template data access (~200 lines)
+// FIXED: Added linkClauses method for proper linking
 // ============================================
 
 const { pool } = require('../connection');
@@ -43,6 +43,43 @@ class TemplateModel {
       await connection.commit();
       return this.findById(templateId);
       
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+  
+  // NEW: Link clauses after template creation (for AI generation)
+  async linkClauses(templateId, clauseIds) {
+    const connection = await pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+      
+      // Clear existing links
+      await connection.execute(
+        'DELETE FROM template_clauses WHERE template_id = ?',
+        [templateId]
+      );
+      
+      // Add new links
+      for (let i = 0; i < clauseIds.length; i++) {
+        await connection.execute(
+          `INSERT INTO template_clauses (template_id, clause_id, position)
+           VALUES (?, ?, ?)`,
+          [templateId, clauseIds[i], i + 1]
+        );
+      }
+      
+      // Update clause_order
+      await connection.execute(
+        'UPDATE templates SET clause_order = ? WHERE id = ?',
+        [JSON.stringify(clauseIds), templateId]
+      );
+      
+      await connection.commit();
     } catch (error) {
       await connection.rollback();
       throw error;
@@ -94,13 +131,33 @@ class TemplateModel {
   }
   
   async update(id, updateData) {
-    const { template_name, document_type, description } = updateData;
+    const fields = [];
+    const params = [];
+    
+    if (updateData.template_name !== undefined) {
+      fields.push('template_name = ?');
+      params.push(updateData.template_name);
+    }
+    
+    if (updateData.document_type !== undefined) {
+      fields.push('document_type = ?');
+      params.push(updateData.document_type);
+    }
+    
+    if (updateData.description !== undefined) {
+      fields.push('description = ?');
+      params.push(updateData.description);
+    }
+    
+    if (fields.length === 0) {
+      return this.findById(id);
+    }
+    
+    params.push(id);
     
     await pool.execute(
-      `UPDATE templates 
-       SET template_name = ?, document_type = ?, description = ?
-       WHERE id = ?`,
-      [template_name, document_type, description, id]
+      `UPDATE templates SET ${fields.join(', ')} WHERE id = ?`,
+      params
     );
     
     return this.findById(id);

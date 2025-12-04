@@ -1,6 +1,6 @@
 // ============================================
 // FILE: src/services/document/generator.service.js
-// Single document generation (~180 lines)
+// IMPROVED: Auto-infer document_type from template
 // ============================================
 
 const aiService = require('../ai/ai.service');
@@ -11,7 +11,21 @@ const documentModel = require('../../database/models/document.model');
 class GeneratorService {
   
   async generate(data) {
-    const { document_type, context, template_id, content_json } = data;
+    let { document_type, context, template_id, content_json } = data;
+    
+    // IMPROVEMENT: Auto-infer document_type from template
+    if (template_id && !document_type) {
+      const template = await templateModel.findById(template_id);
+      if (template) {
+        document_type = template.document_type;
+        console.log(`ℹ️ Auto-inferred document_type: ${document_type} from template ${template_id}`);
+      }
+    }
+    
+    // Now validate
+    if (!document_type) {
+      throw new Error('document_type is required (or provide valid template_id)');
+    }
     
     // PATH 1: Direct content save (no generation)
     if (content_json && !template_id) {
@@ -20,7 +34,7 @@ class GeneratorService {
     
     // PATH 2: Generate from template
     if (template_id) {
-      return this.generateFromTemplate({ template_id, context });
+      return this.generateFromTemplate({ template_id, context, document_type });
     }
     
     // PATH 3: Full AI generation
@@ -37,9 +51,14 @@ class GeneratorService {
     });
   }
   
-  async generateFromTemplate({ template_id, context }) {
+  async generateFromTemplate({ template_id, context, document_type }) {
     const template = await templateModel.findById(template_id);
     if (!template) throw new Error('Template not found');
+    
+    // Use template's document_type if not provided
+    if (!document_type) {
+      document_type = template.document_type;
+    }
     
     let filledContent = { clauses: template.clauses || [] };
     
@@ -52,7 +71,7 @@ class GeneratorService {
     return documentModel.create({
       template_id: template.id,
       document_name: docName,
-      document_type: template.document_type,
+      document_type: document_type,
       content_json: filledContent,
       variables: context || {}
     });

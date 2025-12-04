@@ -1,5 +1,6 @@
 // ============================================
 // FILE: src/controllers/template.controller.js
+// FIXED: Proper cascade delete handling
 // ============================================
 
 const templateModel = require('../database/models/template.model');
@@ -36,29 +37,61 @@ class TemplateController {
         return badRequest(res, 'template_name and document_type are required');
       }
       
+      console.log(`\n🤖 Generating AI template: ${template_name} (${document_type})`);
+      
       const aiResult = await aiService.generateClauses(document_type, context || {});
       
       if (!aiResult.success) {
+        console.error('❌ AI generation failed:', aiResult.error);
         return serverError(res, new Error(aiResult.error));
       }
       
-      const createdClauses = await clauseModel.createMany(
-        aiResult.clauses.map(c => ({
-          ...c,
-          is_ai_generated: true,
-          is_sample: false
-        }))
+      console.log(`✅ AI generated ${aiResult.clauses.length} clauses`);
+      
+      // CRITICAL: First create template WITHOUT clauses
+      const template = await templateModel.create(
+        { 
+          template_name, 
+          document_type, 
+          description: context?.description || 'AI Generated', 
+          is_ai_generated: true 
+        },
+        [] // Empty clause_ids initially
       );
       
+      console.log(`✅ Template created with ID: ${template.id}`);
+      
+      // CRITICAL: Create clauses with template_id for CASCADE DELETE
+      const createdClauses = [];
+      for (const clauseData of aiResult.clauses) {
+        try {
+          const clause = await clauseModel.create({
+            ...clauseData,
+            is_ai_generated: true,
+            is_sample: false,
+            template_id: template.id // THIS enables cascade delete
+          });
+          createdClauses.push(clause);
+        } catch (clauseError) {
+          console.error(`⚠️ Failed to create clause:`, clauseError.message);
+        }
+      }
+      
+      console.log(`✅ Created ${createdClauses.length} clauses linked to template`);
+      
+      // Link clauses to template via template_clauses
       const clauseIds = createdClauses.map(c => c.id);
       
-      const template = await templateModel.create(
-        { template_name, document_type, description: 'AI Generated', is_ai_generated: true },
-        clauseIds
-      );
+      if (clauseIds.length > 0) {
+        await templateModel.linkClauses(template.id, clauseIds);
+        console.log(`✅ Linked ${clauseIds.length} clauses to template`);
+      }
+      
+      // Fetch complete template with clauses
+      const completeTemplate = await templateModel.findById(template.id);
       
       return created(res, {
-        template,
+        template: completeTemplate,
         ai_metadata: {
           clauses_generated: createdClauses.length,
           tokens_used: aiResult.tokensUsed,
@@ -67,6 +100,7 @@ class TemplateController {
         }
       });
     } catch (error) {
+      console.error('❌ Template generation error:', error);
       return serverError(res, error);
     }
   }
